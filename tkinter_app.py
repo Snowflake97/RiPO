@@ -68,8 +68,9 @@ class EyeApp:
                     self.tracker.refresh(frame)
                     if self.tracker.eyes_detected:
                         self.eyes_position.append(self.tracker.gaze)
-                        cv2.imshow("frame", self.tracker.get_frame())
-                        cv2.waitKey(100)
+                        # print(self.tracker.left_eye.normalized_pos)
+                        # cv2.imshow("frame", self.tracker.get_frame())
+                        # cv2.waitKey(100)
 
                 if cv2.waitKey(100) & 0xFF == ord("q"):
                     # q to exit
@@ -85,16 +86,16 @@ class EyeApp:
         self.running = True
         self.capture_running.wait()
         tk.messagebox.showinfo(
-            title="Calibration", message="Look at the upper left corner"
+            title="Calibration", message="Look at the upper left corner of the screen."
         )
         tk.messagebox.showinfo(
-            title="Calibration", message="Look at the upper right corner"
+            title="Calibration", message="Look at the upper right corner of the screen."
         )
         tk.messagebox.showinfo(
-            title="Calibration", message="Look at the lower left corner"
+            title="Calibration", message="Look at the lower left corner of the screen."
         )
         tk.messagebox.showinfo(
-            title="Calibration", message="Look at the lower right corner"
+            title="Calibration", message="Look at the lower right corner of the screen."
         )
         self.running = False
         self.thread_wait = True
@@ -119,7 +120,7 @@ class EyeApp:
         f.close()
 
     def make_heatmap(self):
-        # self.generate_bounds()
+        self.generate_bounds()
         results = self.eyes_position
         # normalize and create a heatmap
         xs = []
@@ -144,7 +145,7 @@ class EyeApp:
         ax = plt.gca()
         heatmap, xedges, yedges = np.histogram2d(xs, ys, bins=10)
         extent = [self.screen_width, 0, 0, self.screen_height]
-        im = plt.imshow(heatmap.T, cmap="inferno", extent=extent, origin="upper")
+        im = plt.imshow(heatmap.T, cmap="inferno", extent=extent, origin="lower")
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.1)
         plt.colorbar(im, cax=cax)
