@@ -27,10 +27,10 @@ class EyeApp:
         self.calibrate_button = tk.Button(
             master, text="Run calibration", command=self.calibrate, width=50
         )
-        self.calibrate_button.pack()
+        # self.calibrate_button.pack()
 
         self.trace_button = tk.Button(
-            master, text="Start tracing", command=self.run, state=tk.DISABLED, width=50
+            master, text="Start tracing", command=self.run, state=tk.NORMAL, width=50
         )
         self.trace_button.pack()
 
