@@ -2,32 +2,52 @@ import tkinter as tk
 import cv2
 import dlib
 import numpy as np
-import matplotlib.pyplot as plt
-from threading import Thread
+import matplotlib.pylab as plt
+from matplotlib import cm
+import seaborn as sns
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from threading import Thread, Event
 import time
+from gaze import Tracker
 
 
 class EyeApp:
     def __init__(self, master):
+        self.tracker = Tracker()
+
         self.master = master
         master.title("RiPO")
+
+        self.screen_width = master.winfo_screenwidth()
+        self.screen_height = master.winfo_screenheight()
 
         self.label = tk.Label(master, text="Eye tracing app")
         self.label.pack()
 
-        self.trace_button = tk.Button(master, text="Start tracing", command=self.run, width=50)
+        self.calibrate_button = tk.Button(
+            master, text="Run calibration", command=self.calibrate, width=50
+        )
+        self.calibrate_button.pack()
+
+        self.trace_button = tk.Button(
+            master, text="Start tracing", command=self.run, state=tk.DISABLED, width=50
+        )
         self.trace_button.pack()
 
-        self.stop_button = tk.Button(master, text="Stop tracing", command=self.stop, state=tk.DISABLED, width=50)
+        self.stop_button = tk.Button(
+            master, text="Stop tracing", command=self.stop, state=tk.DISABLED, width=50
+        )
         self.stop_button.pack()
 
         self.close_button = tk.Button(master, text="Close", command=self.quit, width=50)
         self.close_button.pack()
 
-        self.runing = True
+        self.running = True
         self.eyes_position = []
         self.thread_kill = False
         self.thread_wait = True
+        self.capture_running = Event()
+        self.capture_stopped = Event()
         self.thread = Thread(target=self.trace_eye)
         self.thread.start()
 
@@ -40,83 +60,58 @@ class EyeApp:
             else:
                 self.eyes_position = []
                 cap = cv2.VideoCapture(0)
-                detector = dlib.get_frontal_face_detector()
-                predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
+                self.capture_stopped.clear()
+                self.capture_running.set()
 
-                while self.runing:
-                    ret, frame = cap.read()  # read frame by frame
-                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # gray frame
-                    faces = detector(gray)  # detect face
-                    for face in faces:
+                while self.running:
+                    frame = cap.read()[1]  # read frame by frame
+                    self.tracker.refresh(frame)
+                    if self.tracker.eyes_detected:
+                        self.eyes_position.append(self.tracker.gaze)
+                        cv2.imshow("frame", self.tracker.get_frame())
+                        cv2.waitKey(100)
 
-                        landmarks = predictor(gray, face)  # create face landmarks
-
-                        # coords for eyes
-                        left_coords_right_eye = landmarks.part(36).x - 10, landmarks.part(37).y - 10
-                        right_coords_right_eye = landmarks.part(39).x + 10, landmarks.part(41).y + 10
-
-                        left_coords_left_eye = landmarks.part(42).x - 10, landmarks.part(43).y - 10
-                        right_coords_left_eye = landmarks.part(45).x + 10, landmarks.part(47).y + 10
-
-                        # make right and left eye roi
-                        left_eye_roi = frame[left_coords_right_eye[1]: right_coords_right_eye[1],
-                                       left_coords_right_eye[0]: right_coords_right_eye[0]]
-                        right_eye_roi = frame[left_coords_right_eye[1]: right_coords_right_eye[1],
-                                        left_coords_right_eye[0]: right_coords_right_eye[0]]
-
-                        # make rois gray
-                        gray_right_roi = cv2.cvtColor(right_eye_roi, cv2.COLOR_BGR2GRAY)
-                        gray_left_roi = cv2.cvtColor(left_eye_roi, cv2.COLOR_BGR2GRAY)
-
-                        # blur
-                        gray_right_roi = cv2.GaussianBlur(gray_right_roi, (3, 3), 0)
-                        gray_left_roi = cv2.GaussianBlur(gray_left_roi, (3, 3), 0)
-
-                        # thresholds
-                        _, threshold_right = cv2.threshold(gray_right_roi, 60, 255, cv2.THRESH_BINARY_INV)
-                        _, threshold_left = cv2.threshold(gray_left_roi, 60, 255, cv2.THRESH_BINARY_INV)
-
-                        # grab countours
-                        contours_left, hierarchy = cv2.findContours(threshold_left, cv2.RETR_TREE,
-                                                                    cv2.CHAIN_APPROX_SIMPLE)
-                        contours_right, hierarchy = cv2.findContours(threshold_right, cv2.RETR_TREE,
-                                                                     cv2.CHAIN_APPROX_SIMPLE)
-
-                        # for the largest area calculate rect size and mid point
-                        contours = sorted(contours_left, key=lambda x: cv2.contourArea(x), reverse=True)
-                        for i, cnt in enumerate(contours):
-                            (x, y, w, h) = cv2.boundingRect(cnt)
-                            mid_point = (x + w / 2, y + h / 2)
-                            # print(mid_point)  # print eye position (roi sizes)
-                            self.eyes_position.append(mid_point)
-                            x = x + left_coords_left_eye[0]
-                            y = y + left_coords_left_eye[1]
-                            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)  # draw rect o eye
-                            break
-
-                        # for the largest area calculate rect size and mid point
-                        contours = sorted(contours_right, key=lambda x: cv2.contourArea(x), reverse=True)
-                        for i, cnt in enumerate(contours):
-                            (x, y, w, h) = cv2.boundingRect(cnt)
-                            mid_point = (x + w / 2, y + h / 2)
-                            # print(mid_point)  # print eye position (roi sizes)
-                            self.eyes_position.append(mid_point)
-                            x = x + left_coords_right_eye[0]
-                            y = y + left_coords_right_eye[1]
-                            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)  # draw rect o eye
-                            break
-
-                        cv2.imshow("frame", frame)  # show frame
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        # q to exit
-                        break
-                # quit
-                cap.release()
+                if cv2.waitKey(100) & 0xFF == ord("q"):
+                    # q to exit
+                    break
                 cv2.destroyAllWindows()
+                cap.release()
+                self.capture_running.clear()
+                self.capture_stopped.set()
                 self.thread_wait = True
 
-    def save_results(self):
+    def calibrate(self):
+        self.thread_wait = False
+        self.running = True
+        self.capture_running.wait()
+        tk.messagebox.showinfo(
+            title="Calibration", message="Look at the upper left corner"
+        )
+        tk.messagebox.showinfo(
+            title="Calibration", message="Look at the upper right corner"
+        )
+        tk.messagebox.showinfo(
+            title="Calibration", message="Look at the lower left corner"
+        )
+        tk.messagebox.showinfo(
+            title="Calibration", message="Look at the lower right corner"
+        )
+        self.running = False
+        self.thread_wait = True
+        self.capture_stopped.wait()
+        self.generate_bounds()
+        self.eyes_position = []
+        self.trace_button["state"] = tk.NORMAL
 
+    def generate_bounds(self):
+        results = sorted(self.eyes_position, key=lambda x: x[0])
+        self.min_x = results[0][0]
+        self.max_x = results[-1][0] - self.min_x
+        results = sorted(results, key=lambda x: x[1])
+        self.min_y = results[0][1]
+        self.max_y = results[-1][1] - self.min_y
+
+    def save_results(self):
         with open("result.txt", mode="w") as f:
             for i in self.eyes_position:
                 x, y = i
@@ -124,59 +119,60 @@ class EyeApp:
         f.close()
 
     def make_heatmap(self):
-        results = []
-        min_x = 999
-        min_y = 999
-        with open("result.txt", mode='r') as f:
-            for line in f:
-                elems = line.split(",")
-                x = float(elems[0])
-                y = float(elems[1])
-                if x < min_x:
-                    min_x = x
-                if y < min_y and y > 8:
-                    min_y = y
-                if y > 8:
-                    results.append((x, y))
-        f.close()
-        results = sorted(results, key=lambda x: (x[0], x[1]))
-        for i, res in enumerate(results):
-            x, y = res
-            results[i] = (x - min_x, y - min_y)
-        my_dict = {i: results.count(i) for i in results}
-        if len(results)>0:
-            y_size = int(sorted(results, key=lambda x: (x[1], x[0]))[-1][1])
-            x_size = int(sorted(results, key=lambda x: (x[0], x[1]))[-1][0])
+        # self.generate_bounds()
+        results = self.eyes_position
+        # normalize and create a heatmap
+        xs = []
+        ys = []
+        for i, elem in enumerate(results):
+            elem_x = (elem[0] - self.min_x) / self.max_x
+            elem_y = (elem[1] - self.min_y) / self.max_y
+            x = int(elem_x * self.screen_width)
+            if x < 0:
+                x = 0
+            elif x > self.screen_width:
+                x = self.screen_width
+            y = int(elem_y * self.screen_height)
+            if y < 0:
+                y = 0
+            elif y > self.screen_height:
+                y = self.screen_height
+            xs.append(x)
+            ys.append(y)
 
-
-            array = np.zeros((y_size, x_size))
-
-            for i in my_dict:
-                value = my_dict[i]
-                x, y = i
-                x = int(x)
-                y = int(y)
-                array[y_size - 1 - y][x_size - 1 - x] = int(value)
-
-            plt.imshow(array, cmap='hot', interpolation='nearest')
-            plt.show()
+        plt.figure()
+        ax = plt.gca()
+        heatmap, xedges, yedges = np.histogram2d(xs, ys, bins=10)
+        extent = [self.screen_width, 0, 0, self.screen_height]
+        im = plt.imshow(heatmap.T, cmap="inferno", extent=extent, origin="upper")
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="5%", pad=0.1)
+        plt.colorbar(im, cax=cax)
+        plt.show()
 
     def run(self):
         self.thread_wait = False
-        self.runing = True
-        self.trace_button['state'] = tk.DISABLED
-        self.stop_button['state'] = tk.NORMAL
+        self.running = True
+        self.trace_button["state"] = tk.DISABLED
+        self.stop_button["state"] = tk.NORMAL
 
     def stop(self):
-        self.runing = False
+        self.running = False
         self.thread_wait = True
+        self.stop_button["state"] = tk.DISABLED
+        self.trace_button["state"] = tk.NORMAL
         self.save_results()
         self.make_heatmap()
-        self.stop_button['state'] = tk.DISABLED
-        self.trace_button['state'] = tk.NORMAL
+        self.eyes_position = []
 
     def quit(self):
-        self.runing = False
+        self.running = False
         self.thread_kill = True
         self.thread.join()
         self.master.quit()
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    my_gui = EyeApp(root)
+    my_gui.make_heatmap()
